@@ -169,7 +169,7 @@ class PatchExporter
     end
     log "changes to working tree complete; updating GIT repository"
     @added_files.each {|f| run_git "add '#{f}'"}
-    @changed_files.each {|f| run_git "update-index '#{f}'"}
+    @changed_files.each {|f| run_git "add -u '#{f}'"}
     @renamed_files.each_key {|k| run_git "mv '#{k}' '#{@renamed_files[k]}'"}
     @deleted_files.each {|f| run_git "rm '#{f}'"}
     run_git "commit -m '#{message}' --author \"#{@authors.get_email(author)}\""
