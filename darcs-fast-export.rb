@@ -84,6 +84,11 @@ class PatchExporter
   # the inventory. (Darcs  keeps patch files around after  an unpull but
   # it does this merely by removing  the reference to the patch from the
   # inventory).
+  #
+  # NOTE: this  method is probably not  very robust. We should  sort the
+  # list of patches  so that they are  in the same order as  they are in
+  # the inventory. I  don't think the timestamp is enough,  as Darcs may
+  # have commuted some patches into a non-temporal order.
   def generate_patch_list
     @patches = []
     Dir.new("#{@darcsrepo}/_darcs/patches").entries.each do |entry|
