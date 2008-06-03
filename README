@@ -1,0 +1,60 @@
+# Copyright (C) 2007 James Sadler <freshtonic@gmail.com>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+
+darcs-fast-export is  a Ruby  script that can  natively parse  the Darcs
+(version  1) patch  format  and  replay the  patches  into a  directory,
+creating a Git commit for each Darcs patch.
+
+DISCLAIMER:
+
+Unless  you have  a  very  wedged or  extremely  large  Darcs repo  that
+performs too slowly  for tailor, darcs-2-git etc to recover  into a real
+DVCS, then you are probably better off not using this script.
+
+In fact,  until merger patches are  catered for, it probably  won't work
+for you. Watch this space :)
+
+STATE OF DEVELOPMENT
+
+At the moment it cannot handle Darcs merger patches, but this should not
+be as hard  to add as it  sounds. According to this  nugget of knowledge
+(courtesy of Bertram Felgenhauer):
+
+> The nice  thing about  repo patches  is that, if  they are  applied in
+> inventory  order,  and  if  you  respect  the  'merger'  hunks  (which
+> basically mean to  apply the inverse of the first  part and ignore the
+> second one), you  won't get any conflicts (that is,  if the repository
+> is  consistent).  The format  is  similar  to regular  darcs  patches,
+> without the context.
+
+So in other words, to handle merger patches we do not need to understand
+or  re-implement the  Theory of  Patches. In  my view  of the  way Darcs
+works, the patches  + inventory in the repo is  the *result* of applying
+the Theory of Patches.
+
+If Bertram  is correct,  then it's  feasible that  this code  may handle
+merger patches within  a weekend or two.  If not, then this  will be the
+shortest-lived open source project ever conceived!
+
+RUNNING THE CODE
+
+To run  the code, invoke darcs-fast-export.rb  with no args and  it will
+print the options. They should be self explanatory.
+
+Good luck!
+
+James.
