@@ -73,6 +73,7 @@ class PatchExporter
     @deleted_files = []
     @renamed_files = {}
     @changed_files = []
+    @misspelled_files = {}
     @in = nil           # input stream for the currently parsed patch
 
     parse_command_line(args)
@@ -190,6 +191,9 @@ class PatchExporter
       @in = nil
     end
     log "changes to working tree complete; updating GIT repository"
+
+    fix_misspellings
+
     @added_files.each_slice(40) {|files| run_git "add #{(files.map {|file| "'#{file}'"}).join(" ")}"}
     # Darcs deletes a file by creating a hunk that removes all the lines
     # then deleting the file.  In that case we want no files in the changed list
@@ -203,7 +207,26 @@ class PatchExporter
     @changed_files = []
     @renamed_files = {}
     @deleted_files = []
+    @misspelled_files = {}
     log "finished importing patch"
+  end
+
+  def fix_misspellings
+    @misspelled_files.keys.each do |orig_name|
+      bad_name = @misspelled_files[orig_name]
+      [@added_files, @changed_files, @deleted_files].each do |list|
+        if list.delete(orig_name)
+          list << bad_name
+        end
+      end
+    end
+    @misspelled_files.keys.each do |orig_name|
+      if @renamed_files.keys.include? orig_name
+        value = @renamed_files[orig_name]
+        @renamed_files.delete(orig_name)
+        @renamed_files[bad_name] = value
+      end
+    end
   end
 
   def consume_merger(depth)
@@ -335,7 +358,9 @@ class PatchExporter
       entries = Dir.entries("#{@gitrepo}/#{dir}").map {|f| [f.downcase, f] }
       name = entries.select {|f| filename.downcase == f[0] }
       if name.size > 0
-        File.new("#{@gitrepo}/#{dir}/#{name[0][1]}", "r")
+        misspelled_name = "#{dir}/#{name[0][1]}"
+        @misspelled_files[file] = misspelled_name
+        File.new("#{@gitrepo}/#{misspelled_name}", "r")
       else
         log "could not find version of file differing only in case for file #{file}"
         exit 1
