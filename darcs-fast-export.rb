@@ -129,12 +129,11 @@ class PatchExporter
     author = second[0..second.index("**") - 1]
     git_message = short_message
 
-
-    line = second
+    line = nextline 
 
     begin
       unless line =~ /^\]/
-        git_message = "#{git_message}\n#{line}"
+        git_message = "#{git_message}#{line}"
       end
       line = nextline
     end while !(line =~ /^\]/)
@@ -143,6 +142,7 @@ class PatchExporter
 
     log "author: '#{author}'"
     log "message: '#{git_message}'"
+
 
     begin
       line = nextline
@@ -168,7 +168,7 @@ class PatchExporter
           before, after = line.gsub(/^move /, "").split(" ")
           after = fix_file_name(after)
           log "renaming '#{before}' -> '#{after}'"
-          File.rename before, after
+          #File.rename before, after
           @renamed_files[before] = after
         elsif line =~ /^merger/
           # I think we can just *consume* the 'merger' as the next
@@ -191,8 +191,8 @@ class PatchExporter
     end
     log "changes to working tree complete; updating GIT repository"
     @added_files.each_slice(40) {|files| run_git "add #{(files.map {|file| "'#{file}'"}).join(" ")}"}
+    @changed_files.each_slice(40) {|files| run_git "add #{(files.map {|file| "'#{file}'"}).join(" ")}"}
     @renamed_files.each_key {|k| run_git "mv '#{k}' '#{@renamed_files[k]}'"}
-    run_git "add -u" # handles changed files and renamed files
     @deleted_files.each_slice(4) {|files| run_git "rm #{(files.map {|file| "'#{file}'"}).join(" ")}"}
     run_git "commit -m '#{git_message}' --author \"#{@authors.get_email(author)}\""
     @added_files = []
@@ -289,7 +289,7 @@ class PatchExporter
     file.gsub(/\\32\\/, " ")
   end
 
-  def read_hunk
+  def read_hunk file
     log "processing hunk for file '#{file}'"
     line = nextline
     deleted_lines = []
@@ -334,8 +334,8 @@ class PatchExporter
     else
       # this hunk is a change to an existing file, so consume
       # the original, perform the merge in RAM and write out the result
-      deleted_lines, inserted_lines = read_hunk
-      origin_lines = read_orig_file(file)
+      deleted_lines, inserted_lines = read_hunk file
+      orig_lines = read_original_file(file)
       orig_lines_index = line_number - 1
 
       deleted_lines.size.times {|i| orig_lines.delete_at orig_lines_index}
@@ -445,7 +445,9 @@ class AuthorFile
   end
 
   def get_email(author)
-    @authors[author]
+    email = @authors[author]
+    email unless email
+    "James Sadler <freshtonic@gmail.com>"
   end
 end
 
