@@ -337,9 +337,6 @@ class PatchExporter
     out_file.close
   end
 
-  # Currently ignores 'oldhex'  in the darcs patch. Oh well,  we will soon
-  # discover if  darcs uses bin diffs  when my export doesn't  match up to
-  # what's in darcs!
   def write_binary(file)
     @changed_files << file
     out_file = File.new("#{@gitrepo}/#{file}", "w")
@@ -348,7 +345,7 @@ class PatchExporter
       until nextline =~ /^newhex/
       end
       until (line = nextline) =~ /^[^*]/
-        out_file.write(unpack_binary(line[1..-1]))
+        unpack_binary(line[1..-1], out_file)
       end
       ensure
       out_file.close
@@ -386,8 +383,9 @@ class PatchExporter
   # Converts a string of pairs of hex digits to bytes.
   # I doubt this is quick, but it's so ingenious (not my own
   # ingenuity, I must confess - saw it on the web!).
-  def unpack_binary(line)
-    line.scan(/.{2}/).map{ |hex_byte| hex_byte.hex.chr }.join
+  def unpack_binary(line, file)
+    #line.scan(/.{2}/).map{ |hex_byte| hex_byte.hex.chr }.join
+    line.scan(/.{2}/).each { |hex_byte| file.write(hex_byte.hex.chr) }
   end
 end
 
