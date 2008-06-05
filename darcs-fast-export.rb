@@ -55,6 +55,9 @@
 # commited.
 
 # TODO: verify handling of changes to binaries actually works
+#
+# TODO: obtain  patch  order  by extracting  timestamps  in order  from
+# inventory file.
 
 require 'optparse'
 require 'open3'
@@ -153,9 +156,14 @@ class PatchExporter
           log "renaming '#{before}' -> '#{after}'"
           File.rename before, after
           @renamed_files[before] = after
+        elsif line =~ /^merger/
+          # I think we can just *consume* the 'merger' as the next
+          # patch file we parse will contain the complete patch resolution.
+          unread(line)
+          consume_merger(0)
         else
           log err_unexpected(line, 
-            "/^(adddir|addfile|rmfile|hunk|move|binary)/") 
+            "/^(adddir|addfile|rmfile|hunk|move|binary|merger)/") 
           exit 1
         end
         line = nextline
@@ -178,6 +186,17 @@ class PatchExporter
     @renamed_files = {}
     @deleted_files = []
     log "finished importing patch"
+  end
+
+  def consume_merger(depth)
+    begin 
+      line = readline
+      if line =~ /^merger/
+        depth+=1
+      elsif line =~ /^\)/
+        depth-=1
+      end
+    end while count > 0
   end
 
   def parse_command_line(args)
