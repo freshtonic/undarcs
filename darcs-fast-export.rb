@@ -124,11 +124,24 @@ class PatchExporter
   def export_patch
     first  = nextline
     second = nextline
-    message = first[1..-1].rstrip
+    short_message = first[1..-1].rstrip
     author = second[0..second.index("**") - 1]
+    git_message = short_message
+
+
+    line = second
+
+    begin
+      unless line =~ /^\]/
+        git_message = "#{git_message}\n#{line}"
+      end
+      line = nextline
+    end while !(line =~ /^\]/)
+
+    git_message.gsub! /\\n/, "\\n"
 
     log "author: '#{author}'"
-    log "message: '#{message}'"
+    log "message: '#{git_message}'"
 
     begin
       line = nextline
@@ -180,7 +193,7 @@ class PatchExporter
     @changed_files.each {|f| run_git "add -u '#{f}'"}
     @renamed_files.each_key {|k| run_git "mv '#{k}' '#{@renamed_files[k]}'"}
     @deleted_files.each {|f| run_git "rm '#{f}'"}
-    run_git "commit -m '#{message}' --author \"#{@authors.get_email(author)}\""
+    run_git "commit -m '#{git_message}' --author \"#{@authors.get_email(author)}\""
     @added_files = []
     @changed_files = []
     @renamed_files = {}
