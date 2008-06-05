@@ -191,6 +191,10 @@ class PatchExporter
     end
     log "changes to working tree complete; updating GIT repository"
     @added_files.each_slice(40) {|files| run_git "add #{(files.map {|file| "'#{file}'"}).join(" ")}"}
+    # Darcs deletes a file by creating a hunk that removes all the lines
+    # then deleting the file.  In that case we want no files in the changed list
+    # that are in the deleted list, or we will break Git.
+    @changed_files = @changed_files = @deleted_files
     @changed_files.each_slice(40) {|files| run_git "add #{(files.map {|file| "'#{file}'"}).join(" ")}"}
     @renamed_files.each_key {|k| run_git "mv '#{k}' '#{@renamed_files[k]}'"}
     @deleted_files.each_slice(4) {|files| run_git "rm #{(files.map {|file| "'#{file}'"}).join(" ")}"}
@@ -304,7 +308,7 @@ class PatchExporter
   end
 
   def read_original_file(file)
-    in_file = File.new("#{@gitrepo}/#{file}", "r")
+    in_file = open_file_for_reading(file)
     origin_lines = nil
     begin
       orig_lines = in_file.readlines
@@ -312,6 +316,31 @@ class PatchExporter
       in_file.close
     end
     orig_lines
+  end
+
+  def open_file_for_reading(file)
+    # urgh! - seems at some point we got the same file referred to
+    # with differing case in a darcs patch.  If we can't find the file
+    # we need to check if a file exists on the file system that differs
+    # only in case and use that instead.
+    begin
+      File.new("#{@gitrepo}/#{file}", "r")
+    rescue
+      # list all files in the directory of file, and see if there's
+      # a case-insensitive match against the file we are looking for
+      # and use that instead.  This is not a general solution: we will
+      # not handle directory case-insensitivity.
+      filename = file.split("/")[-1]
+      dir = file.split("/")[0..-2].join("/")
+      entries = Dir.entries("#{@gitrepo}/#{dir}").map {|f| [f.downcase, f] }
+      name = entries.select {|f| filename.downcase == f[0] }
+      if name.size > 0
+        File.new("#{@gitrepo}/#{dir}/#{name[0][1]}", "r")
+      else
+        log "could not find version of file differing only in case for file #{file}"
+        exit 1
+      end
+    end
   end
 
   def apply_hunk(file, line_number)
