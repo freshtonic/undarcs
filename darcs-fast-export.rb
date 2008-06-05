@@ -59,6 +59,7 @@
 # TODO: obtain  patch  order  by extracting  timestamps  in order  from
 # inventory file.
 
+require 'enumerator'
 require 'optparse'
 require 'open3'
 
@@ -189,10 +190,10 @@ class PatchExporter
       @in = nil
     end
     log "changes to working tree complete; updating GIT repository"
-    @added_files.each {|f| run_git "add '#{f}'"}
-    @changed_files.each {|f| run_git "add -u '#{f}'"}
+    @added_files.each_slice(40) {|files| run_git "add #{(files.map {|file| "'#{file}'"}).join(" ")}"}
     @renamed_files.each_key {|k| run_git "mv '#{k}' '#{@renamed_files[k]}'"}
-    @deleted_files.each {|f| run_git "rm '#{f}'"}
+    run_git "add -u" # handles changed files and renamed files
+    @deleted_files.each_slice(4) {|files| run_git "rm #{(files.map {|file| "'#{file}'"}).join(" ")}"}
     run_git "commit -m '#{git_message}' --author \"#{@authors.get_email(author)}\""
     @added_files = []
     @changed_files = []
@@ -240,7 +241,16 @@ class PatchExporter
         @gitrepo = gitrepo
       end
 
+      options.on(
+        '-b [skip]',
+        '--skip-binaries [skip]',
+        'Skips binary files (i.e. will not include them in the generated Git repo)'
+      ) do |skip|
+        @skip_binaries = (skip =~ /^true$/)
+      end
+
       begin
+        @skip_binaries = false
         options.parse! args
       rescue OptionParser::InvalidOption
         log "Failed to parse options(#{$!})"
@@ -279,8 +289,7 @@ class PatchExporter
     file.gsub(/\\32\\/, " ")
   end
 
-  def apply_hunk(file, line_number)
-    @changed_files << file unless @changed_files.include? file
+  def read_hunk
     log "processing hunk for file '#{file}'"
     line = nextline
     deleted_lines = []
@@ -291,6 +300,10 @@ class PatchExporter
       line = nextline
     end
     unreadline(line)
+    return deleted_lines, inserted_lines
+  end
+
+  def read_original_file(file)
     in_file = File.new("#{@gitrepo}/#{file}", "r")
     origin_lines = nil
     begin
@@ -298,20 +311,45 @@ class PatchExporter
     ensure
       in_file.close
     end
-    
-    orig_lines_index = line_number - 1
+    orig_lines
+  end
 
-    deleted_lines.size.times {|i| orig_lines.delete_at orig_lines_index}
-    orig_lines.insert(orig_lines_index, inserted_lines)
-    orig_lines.flatten!
-    
-    out_file = File.new("#{@gitrepo}/#{file}", "w")
-    begin
-      orig_lines.each do |orig_line|
-        out_file.write orig_line
+  def apply_hunk(file, line_number)
+    @changed_files << file unless @changed_files.include? file
+    log "processing hunk for file '#{file}'"
+    if @added_files.include? file
+      # optimisation: avoid reading the entire hunk into 
+      # RAM when it's a new file that we are creating
+      out_file = File.new("#{@gitrepo}/#{file}", "w")
+      begin
+        line = nextline 
+        until !(line =~ /^([+]|[-])/) # for some reason, even on a new file, we can have '-' lines....??
+          out_file.write(line[1..-1]) if line =~ /^[+]/
+          line = nextline
+        end
+        unreadline(line)
+      ensure
+        out_file.close
       end
-    ensure
-      out_file.close
+    else
+      # this hunk is a change to an existing file, so consume
+      # the original, perform the merge in RAM and write out the result
+      deleted_lines, inserted_lines = read_hunk
+      origin_lines = read_orig_file(file)
+      orig_lines_index = line_number - 1
+
+      deleted_lines.size.times {|i| orig_lines.delete_at orig_lines_index}
+      orig_lines.insert(orig_lines_index, inserted_lines)
+      orig_lines.flatten!
+      
+      out_file = File.new("#{@gitrepo}/#{file}", "w")
+      begin
+        orig_lines.each do |orig_line|
+          out_file.write orig_line
+        end
+      ensure
+        out_file.close
+      end
     end
   end
 
@@ -339,16 +377,22 @@ class PatchExporter
 
   def write_binary(file)
     @changed_files << file
-    out_file = File.new("#{@gitrepo}/#{file}", "w")
+    if @skip_binaries
+      log "NOT writing binary file #{file}, skipping"
+    else
+      log "writing binary file #{file}"
+    end
+
+    out_file = File.new("#{@gitrepo}/#{file}", "w") unless @skip_binaries
     begin
       consume_line(/^oldhex/)
       until nextline =~ /^newhex/
       end
       until (line = nextline) =~ /^[^*]/
-        unpack_binary(line[1..-1], out_file)
+        unpack_binary(line[1..-1], out_file) unless @skip_binaries
       end
       ensure
-      out_file.close
+      out_file.close unless @skip_binaries
     end
     unreadline(line)
   end
@@ -382,10 +426,9 @@ class PatchExporter
 
   # Converts a string of pairs of hex digits to bytes.
   # I doubt this is quick, but it's so ingenious (not my own
-  # ingenuity, I must confess - saw it on the web!).
+  # ingenuity, I must confess - found it on the web!).
   def unpack_binary(line, file)
-    #line.scan(/.{2}/).map{ |hex_byte| hex_byte.hex.chr }.join
-    line.scan(/.{2}/).each { |hex_byte| file.write(hex_byte.hex.chr) }
+    line.scan(/.{2}/).each { |hex_byte| file.putc(hex_byte.hex.chr) }
   end
 end
 
