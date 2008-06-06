@@ -201,7 +201,7 @@ class PatchExporter
           # the name from 'added_files' if it's there, and replace
           # it with the new name.
           if @added_files.include? before
-            @added_files - [before]
+            @added_files.delete(before)
             @added_files << after
           else
             File.rename "#{@gitrepo}/#{before}", "#{@gitrepo}/#{after}"
@@ -479,8 +479,8 @@ class PatchExporter
     # weird, I know but darcs will happily create, edit, move and then
     # destroy a file all in the same patch.  So we need to remove the file
     # from the 'add' list.
-    @added_files - [file]
-    @renamed_files.delete(file)
+    @added_files.delete(file)
+    @renamed_files.delete(@renamed_files.invert[file])
   end
 
   def consume_line(regex)
