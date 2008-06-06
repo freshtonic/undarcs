@@ -62,6 +62,7 @@
 require 'enumerator'
 require 'optparse'
 require 'open3'
+require 'fileutils'
 
 class PatchExporter
 
@@ -121,24 +122,47 @@ class PatchExporter
     end
   end
 
+
   def export_patch
-    first  = nextline
-    second = nextline
-    short_message = first[1..-1].rstrip
-    author = second[0..second.index("**") - 1]
-    git_message = short_message
 
-    if !(second =~ /\{$/)
-      line = nextline 
+    # This method is complicated. It  can probably be made much simpler.
+    # One of the  reasons for the complexity is that  darcs patches have
+    # differing formats,  depending on  the version  of darcs  that made
+    # them. Which makes the whole thing a little tricky. E.g. at the end
+    # of the  last message line, some  patches end with a  '{' and close
+    # off the whole patch with another '}'.  This is good: it means if I
+    # get and EOF  error it's because I've screwed up  the parsing code.
+    # However, some darcs patches omit the '{' and '}' which means I can
+    # no longer tell when I have screwed up.
+
+    short_message_line = nextline
+    author_line = nextline
+
+    short_message = short_message_line[1..-1].rstrip
+    author = author_line[0..author_line.index("**") - 1]
+
+    long_message = ""
+
+    if author_line =~ /[0-9]{14}$/
       begin
-        unless line =~ /^\]/
-          git_message = "#{git_message}#{line}"
-        end
         line = nextline
+        long_message = "#{long_message}#{line}"
       end while !(line =~ /^\]/)
+    else 
+      if author_line =~ /[0-9]{14}\] (adddir|addfile|rmfile|rmdir|hunk|move|binary|merger|changepref)/
+        to_keep = author_line[author_line.index("] ") + 2..-1]
+        unreadline(to_keep)        
+      elsif author_line =~ /[0-9]{14}\] \{$/
+        # continue
+      else
+        log "unknown patch format: author_line '#{author_line}'"
+        exit 1
+      end
     end
-
+   
+    git_message = "#{short_message}#{long_message}"
     git_message.gsub! /\\n/, "\\n"
+    git_message.gsub! /['"`]/, ""
 
     log "author: '#{author}'"
     log "message: '#{git_message}'"
@@ -156,6 +180,9 @@ class PatchExporter
         elsif line =~ /^rmfile/
           file = fix_file_name(line.gsub(/^rmfile /, "").rstrip)
           rm_file(file)
+        elsif line =~ /^rmdir/
+          dir = fix_file_name(line.gsub(/^rmdir /, "").rstrip)
+          FileUtils.rm_rf "#{@gitrepo}/#{dir}"
         elsif line =~ /^hunk/
           file, line_number = line.gsub(/^hunk /, "").rstrip.split(" ")
           file = fix_file_name(file)
@@ -173,7 +200,7 @@ class PatchExporter
         elsif line =~ /^merger/
           # I think we can just *consume* the 'merger' as the next
           # patch file we parse will contain the complete patch resolution.
-          unread(line)
+          unreadline(line)
           consume_merger(0)
         elsif line =~ /^changepref/
           # we don't do any thing with changepref (meaningless in Git)
@@ -184,14 +211,14 @@ class PatchExporter
           nextline
         else
           log err_unexpected(line, 
-            "/^(adddir|addfile|rmfile|hunk|move|binary|merger|changepref)/") 
+            "/^(adddir|addfile|rmfile|rmdir|hunk|move|binary|merger|changepref)/") 
           exit 1
         end
         line = nextline
       end
     rescue EOFError
       log "unexpected end of patch file detected"
-      exit 1
+      #exit 1
     ensure
       @lin_buf = []
       @in = nil
@@ -219,13 +246,13 @@ class PatchExporter
 
   def consume_merger(depth)
     begin 
-      line = readline
+      line = nextline
       if line =~ /^merger/
         depth+=1
       elsif line =~ /^\)/
         depth-=1
       end
-    end while count > 0
+    end while depth > 0
   end
 
   def parse_command_line(args)
@@ -469,6 +496,7 @@ class AuthorFile
     "James Sadler <freshtonic@gmail.com>"
   end
 end
+
 
 PatchExporter.new(ARGV).export()
 
