@@ -73,7 +73,6 @@ class PatchExporter
     @deleted_files = []
     @renamed_files = {}
     @changed_files = []
-    @misspelled_files = {}
     @in = nil           # input stream for the currently parsed patch
 
     parse_command_line(args)
@@ -110,14 +109,13 @@ class PatchExporter
       end
     end
     @patches = (@patches - to_remove).sort
-    log "patches will be applied in the following order: 
-    #{"\ndarcs-fast-export: " + @patches.join("\ndarcs-fast-export: ")}"
   end
 
   def export
     generate_patch_list
     @patches.each do |patch|
       log "converting patch #{patch}"
+      readline
       @in = IO.popen("gunzip -c #{@darcsrepo}/_darcs/patches/#{patch}")
       export_patch
     end
@@ -169,7 +167,7 @@ class PatchExporter
           before, after = line.gsub(/^move /, "").split(" ")
           after = fix_file_name(after)
           log "renaming '#{before}' -> '#{after}'"
-          #File.rename before, after
+          File.rename "#{@gitrepo}/#{before}", "#{@gitrepo}/#{after}"
           @renamed_files[before] = after
         elsif line =~ /^merger/
           # I think we can just *consume* the 'merger' as the next
@@ -192,41 +190,22 @@ class PatchExporter
     end
     log "changes to working tree complete; updating GIT repository"
 
-    fix_misspellings
-
+    @renamed_files.each_key {|k| run_git "add -u '#{k}'"}
+    @renamed_files.each_value {|v| run_git "add '#{v}'"}
+    @added_files = @added_files - @deleted_files
     @added_files.each_slice(40) {|files| run_git "add #{(files.map {|file| "'#{file}'"}).join(" ")}"}
     # Darcs deletes a file by creating a hunk that removes all the lines
-    # then deleting the file.  In that case we want no files in the changed list
+    # then deletes the file.  In that case we want no files in the changed list
     # that are in the deleted list, or we will break Git.
-    @changed_files = @changed_files = @deleted_files
+    @changed_files = @changed_files - @deleted_files
     @changed_files.each_slice(40) {|files| run_git "add #{(files.map {|file| "'#{file}'"}).join(" ")}"}
-    @renamed_files.each_key {|k| run_git "mv '#{k}' '#{@renamed_files[k]}'"}
-    @deleted_files.each_slice(4) {|files| run_git "rm #{(files.map {|file| "'#{file}'"}).join(" ")}"}
+    @deleted_files.each_slice(40) {|files| run_git "rm #{(files.map {|file| "'#{file}'"}).join(" ")}"}
     run_git "commit -m '#{git_message}' --author \"#{@authors.get_email(author)}\""
     @added_files = []
     @changed_files = []
     @renamed_files = {}
     @deleted_files = []
-    @misspelled_files = {}
     log "finished importing patch"
-  end
-
-  def fix_misspellings
-    @misspelled_files.keys.each do |orig_name|
-      bad_name = @misspelled_files[orig_name]
-      [@added_files, @changed_files, @deleted_files].each do |list|
-        if list.delete(orig_name)
-          list << bad_name
-        end
-      end
-    end
-    @misspelled_files.keys.each do |orig_name|
-      if @renamed_files.keys.include? orig_name
-        value = @renamed_files[orig_name]
-        @renamed_files.delete(orig_name)
-        @renamed_files[bad_name] = value
-      end
-    end
   end
 
   def consume_merger(depth)
@@ -342,30 +321,7 @@ class PatchExporter
   end
 
   def open_file_for_reading(file)
-    # urgh! - seems at some point we got the same file referred to
-    # with differing case in a darcs patch.  If we can't find the file
-    # we need to check if a file exists on the file system that differs
-    # only in case and use that instead.
-    begin
       File.new("#{@gitrepo}/#{file}", "r")
-    rescue
-      # list all files in the directory of file, and see if there's
-      # a case-insensitive match against the file we are looking for
-      # and use that instead.  This is not a general solution: we will
-      # not handle directory case-insensitivity.
-      filename = file.split("/")[-1]
-      dir = file.split("/")[0..-2].join("/")
-      entries = Dir.entries("#{@gitrepo}/#{dir}").map {|f| [f.downcase, f] }
-      name = entries.select {|f| filename.downcase == f[0] }
-      if name.size > 0
-        misspelled_name = "#{dir}/#{name[0][1]}"
-        @misspelled_files[file] = misspelled_name
-        File.new("#{@gitrepo}/#{misspelled_name}", "r")
-      else
-        log "could not find version of file differing only in case for file #{file}"
-        exit 1
-      end
-    end
   end
 
   def apply_hunk(file, line_number)
