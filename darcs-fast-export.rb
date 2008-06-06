@@ -257,10 +257,10 @@ class PatchExporter
     end
     log "changes to working tree complete; updating GIT repository"
 
-    @renamed_files.each_key {|k| run_git "add -u '#{k}'"}
-    @renamed_files.each_value {|v| run_git "add '#{v}'"}
+    @renamed_files.keys.each_slice(80) {|files| run_git "add -u #{(files.map{|file| "'#{file}'"}).join(" ")}"}
+    @renamed_files.values.each_slice(80) {|files| run_git "add #{(files.map{|file| "'#{file}'"}).join(" ")}"}
     @added_files = @added_files - @deleted_files
-    @added_files.each_slice(40) {|files| run_git "add #{(files.map {|file| "'#{file}'"}).join(" ")}"}
+    @added_files.each_slice(80) {|files| run_git "add #{(files.map {|file| "'#{file}'"}).join(" ")}"}
     # Darcs deletes a file by creating a hunk that removes all the lines
     # then deletes the file.  In that case we want no files in the changed list
     # that are in the deleted list, or we will break Git.
