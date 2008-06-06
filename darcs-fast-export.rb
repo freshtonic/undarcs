@@ -73,7 +73,6 @@ class PatchExporter
     @added_files = []   
     @deleted_files = []
     @renamed_files = {}
-    @changed_files = []
     @in = nil           # input stream for the currently parsed patch
 
     parse_command_line(args)
@@ -156,6 +155,7 @@ class PatchExporter
         # continue
       else
         log "unknown patch format: author_line '#{author_line}'"
+        log "in patch #{@current_patch}"
         exit 1
       end
     end
@@ -195,7 +195,17 @@ class PatchExporter
           before, after = line.gsub(/^move /, "").split(" ")
           after = fix_file_name(after)
           log "renaming '#{before}' -> '#{after}'"
-          File.rename "#{@gitrepo}/#{before}", "#{@gitrepo}/#{after}"
+          # Apparently darcs thinks is a good idea to add and then
+          # move a file in the same patch. Before we attempt to move
+          # a file that's not yet on disk, let's just simply remove
+          # the name from 'added_files' if it's there, and replace
+          # it with the new name.
+          if @added_files.include? before
+            @added_files - [before]
+            @added_files << after
+          else
+            File.rename "#{@gitrepo}/#{before}", "#{@gitrepo}/#{after}"
+          end
           @renamed_files[before] = after
         elsif line =~ /^merger/
           # I think we can just *consume* the 'merger' as the next
@@ -211,7 +221,6 @@ class PatchExporter
           nextline
         elsif line =~ /^replace/
           file, ignored, to_replace, replacement = line.gsub(/^replace /, "").rstrip.split(" ")
-          @changed_files << file
           replace(file, to_replace, replacement)
         else
           log err_unexpected(line, 
@@ -237,12 +246,9 @@ class PatchExporter
     # Darcs deletes a file by creating a hunk that removes all the lines
     # then deletes the file.  In that case we want no files in the changed list
     # that are in the deleted list, or we will break Git.
-    @changed_files = @changed_files - @deleted_files
-    @changed_files.each_slice(40) {|files| run_git "add #{(files.map {|file| "'#{file}'"}).join(" ")}"}
-    @deleted_files.each_slice(40) {|files| run_git "rm #{(files.map {|file| "'#{file}'"}).join(" ")}"}
+    run_git "add -u"  # take care of changed and deleted files
     run_git "commit -m '#{git_message}' --author \"#{@authors.get_email(author)}\""
     @added_files = []
-    @changed_files = []
     @renamed_files = {}
     @deleted_files = []
     @line_number = 1
@@ -327,6 +333,7 @@ class PatchExporter
       serrlines = serr.readlines
       if serrlines.size > 0
         serrlines.each {|line| $stderr.puts line }
+        log "in patch #{@current_patch}"
         exit 1
       end
     end
@@ -379,7 +386,6 @@ class PatchExporter
   end
 
   def apply_hunk(file, line_number)
-    @changed_files << file unless @changed_files.include? file
     log "processing hunk for file '#{file}'"
     if @added_files.include? file
       # optimisation: avoid reading the entire hunk into 
@@ -440,7 +446,6 @@ class PatchExporter
   end
 
   def write_binary(file)
-    @changed_files << file
     if @skip_binaries
       log "NOT writing binary file #{file}, skipping"
     else
@@ -471,6 +476,11 @@ class PatchExporter
     @deleted_files << file
     log "removing file '#{file}'"
     File.delete "#{@gitrepo}/#{file}"
+    # weird, I know but darcs will happily create, edit, move and then
+    # destroy a file all in the same patch.  So we need to remove the file
+    # from the 'add' list.
+    @added_files - [file]
+    @renamed_files.delete(file)
   end
 
   def consume_line(regex)
