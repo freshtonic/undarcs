@@ -116,7 +116,7 @@ class PatchExporter
     generate_patch_list
     @patches.each do |patch|
       log "converting patch #{patch}"
-      readline
+      @current_patch = patch
       @in = IO.popen("gunzip -c #{@darcsrepo}/_darcs/patches/#{patch}")
       export_patch
     end
@@ -149,7 +149,7 @@ class PatchExporter
         long_message = "#{long_message}#{line}"
       end while !(line =~ /^\]/)
     else 
-      if author_line =~ /[0-9]{14}\] (adddir|addfile|rmfile|rmdir|hunk|move|binary|merger|changepref)/
+      if author_line =~ /[0-9]{14}\] (adddir|addfile|replace|rmfile|rmdir|hunk|move|binary|merger|changepref)/
         to_keep = author_line[author_line.index("] ") + 2..-1]
         unreadline(to_keep)        
       elsif author_line =~ /[0-9]{14}\] \{$/
@@ -209,9 +209,14 @@ class PatchExporter
           # changepref pref_name <newline> <newline> value
           nextline
           nextline
+        elsif line =~ /^replace/
+          file, ignored, to_replace, replacement = line.gsub(/^replace /, "").rstrip.split(" ")
+          @changed_files << file
+          replace(file, to_replace, replacement)
         else
           log err_unexpected(line, 
-            "/^(adddir|addfile|rmfile|rmdir|hunk|move|binary|merger|changepref)/") 
+            "/^(adddir|addfile|replace|rmfile|rmdir|hunk|move|binary|merger|changepref)/")
+          log "in patch #{@current_patch}"
           exit 1
         end
         line = nextline
@@ -317,6 +322,19 @@ class PatchExporter
 
   def run_git(command)
     Open3.popen3("(cd #{@gitrepo} && git #{command})") do |sin,sout,serr|
+      log "executing command '#{command}'"
+      sinlines = sout.readlines
+      serrlines = serr.readlines
+      if serrlines.size > 0
+        serrlines.each {|line| $stderr.puts line }
+        exit 1
+      end
+    end
+  end
+
+  def replace(file, oldtext, newtext)
+    command = "sed -i 's/#{oldtext}/#{newtext}/g' #{@gitrepo}/#{file}"
+    Open3.popen3("(#{command})") do |sin,sout,serr|
       log "executing command '#{command}'"
       sinlines = sout.readlines
       serrlines = serr.readlines
