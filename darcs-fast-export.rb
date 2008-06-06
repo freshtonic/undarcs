@@ -58,6 +58,12 @@
 #
 # TODO: obtain  patch  order  by extracting  timestamps  in order  from
 # inventory file.
+#
+# TODO: assert that there are no untracked files after applying changes to
+# the git repo.
+#
+# TODO: Git doesn't like empty directories, so insert a hidden 
+# .darcs-fast-export file in each new dir (and add it to git).
 
 require 'enumerator'
 require 'optparse'
