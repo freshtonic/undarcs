@@ -213,6 +213,7 @@ class PatchExporter
     @changed_files = []
     @renamed_files = {}
     @deleted_files = []
+    @line_number = 1
     log "finished importing patch"
   end
 
