@@ -128,14 +128,15 @@ class PatchExporter
     author = second[0..second.index("**") - 1]
     git_message = short_message
 
-    line = nextline 
-
-    begin
-      unless line =~ /^\]/
-        git_message = "#{git_message}#{line}"
-      end
-      line = nextline
-    end while !(line =~ /^\]/)
+    if !(second =~ /\{$/)
+      line = nextline 
+      begin
+        unless line =~ /^\]/
+          git_message = "#{git_message}#{line}"
+        end
+        line = nextline
+      end while !(line =~ /^\]/)
+    end
 
     git_message.gsub! /\\n/, "\\n"
 
