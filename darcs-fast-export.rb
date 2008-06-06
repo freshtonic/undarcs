@@ -144,7 +144,8 @@ class PatchExporter
     author_line = nextline
 
     short_message = short_message_line[1..-1].rstrip
-    author = author_line[0..author_line.index("**") - 1]
+    index_of_delim = author_line.index("**") || author_line.index("*-")
+    author = author_line[0..index_of_delim - 1]
 
     long_message = ""
 
