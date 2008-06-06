@@ -175,9 +175,16 @@ class PatchExporter
           # patch file we parse will contain the complete patch resolution.
           unread(line)
           consume_merger(0)
+        elsif line =~ /^changepref/
+          # we don't do any thing with changepref (meaningless in Git)
+          # but we do need to consume it.
+          # changepref is of the format:
+          # changepref pref_name <newline> <newline> value
+          nextline
+          nextline
         else
           log err_unexpected(line, 
-            "/^(adddir|addfile|rmfile|hunk|move|binary|merger)/") 
+            "/^(adddir|addfile|rmfile|hunk|move|binary|merger|changepref)/") 
           exit 1
         end
         line = nextline
