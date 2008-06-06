@@ -174,10 +174,11 @@ class PatchExporter
     log "author: '#{author}'"
     log "message: '#{git_message}'"
 
+    special_hunk_nesting = 0
 
     begin
       line = nextline
-      until line =~ /^\}$/
+      until line =~ /^\}$/ and special_hunk_nesting == 0
         if line =~ /^adddir/
           dir = fix_file_name(line.gsub(/^adddir /, "").rstrip)
           add_dir(dir)
@@ -229,6 +230,16 @@ class PatchExporter
         elsif line =~ /^replace/
           file, ignored, to_replace, replacement = line.gsub(/^replace /, "").rstrip.split(" ")
           replace(file, to_replace, replacement)
+        elsif line =~ /^\{/
+          # Dammit, I hate it when  I find something I don't understand.
+          # I have  a '{'  appearing as  the first  character on  a line
+          # within a hunk. And further down  I have a lone '}'. For some
+          # reason,  this hunk  is special  and I  don't know  why. I'll
+          # parse them for now, but ignore them.
+          special_hunk_nesting += 1
+        elsif line =~ /^\}/
+          special_hunk_nesting -= 1
+          unreadline(line) if special_hunk_nesting == 0 # force termination at top of loop
         else
           log err_unexpected(line, 
             "/^(adddir|addfile|replace|rmfile|rmdir|hunk|move|binary|merger|changepref)/")
