@@ -114,7 +114,8 @@ class PatchExporter
         to_remove << p
       end
     end
-    @patches = (@patches - to_remove).sort
+    @patches = (@patches.select {|p| !to_remove.include? p}).sort
+
   end
 
   def export
@@ -375,7 +376,7 @@ class PatchExporter
   end
 
   def read_hunk file
-    log "processing hunk for file '#{file}'"
+    log "reading hunk for '#{file}'"
     line = nextline
     deleted_lines = []
     inserted_lines= []
@@ -404,7 +405,7 @@ class PatchExporter
   end
 
   def apply_hunk(file, line_number)
-    log "processing hunk for file '#{file}'"
+    log "applying hunk to '#{file}'"
     if @added_files.include? file
       # optimisation: avoid reading the entire hunk into 
       # RAM when it's a new file that we are creating
@@ -423,20 +424,30 @@ class PatchExporter
       # this hunk is a change to an existing file, so consume
       # the original, perform the merge in RAM and write out the result
       deleted_lines, inserted_lines = read_hunk file
-      orig_lines = read_original_file(file)
-      orig_lines_index = line_number - 1
+      if File.exists?("#{@gitrepo}/#{file}")
+        orig_lines = read_original_file(file)
+        orig_lines_index = line_number - 1
 
-      deleted_lines.size.times {|i| orig_lines.delete_at orig_lines_index}
-      orig_lines.insert(orig_lines_index, inserted_lines)
-      orig_lines.flatten!
-      
-      out_file = File.new("#{@gitrepo}/#{file}", "w")
-      begin
-        orig_lines.each do |orig_line|
-          out_file.write orig_line
+        deleted_lines.size.times {|i| orig_lines.delete_at orig_lines_index}
+        orig_lines.insert(orig_lines_index, inserted_lines)
+        orig_lines.flatten!
+        
+        out_file = File.new("#{@gitrepo}/#{file}", "w")
+        begin
+          orig_lines.each do |orig_line|
+            out_file.write orig_line
+          end
+        ensure
+          out_file.close
         end
-      ensure
-        out_file.close
+      else
+        log "WARN: attempt to apply hunk to non-existing file #{file}"
+        if inserted_lines.size == 0
+          log "No lines were inserted"
+        else
+          log "lines were supposed to be inserted - something bad has happened"
+          exit 1
+        end
       end
     end
   end
@@ -493,7 +504,12 @@ class PatchExporter
   def rm_file(file)
     @deleted_files << file
     log "removing file '#{file}'"
-    File.delete "#{@gitrepo}/#{file}"
+    if File.exists? "#{@gitrepo}/#{file}"
+      File.delete "#{@gitrepo}/#{file}"
+    else
+      log "file did not exist, this may be an error but its valid for " +
+        "two patches to remove the same file and not conflict"
+    end
     # weird, I know but darcs will happily create, edit, move and then
     # destroy a file all in the same patch.  So we need to remove the file
     # from the 'add' list.
