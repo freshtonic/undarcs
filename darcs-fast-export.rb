@@ -46,29 +46,20 @@
 # processing time.
 #
 
-# TODO: handle conflict, tag and undo patches.
-
-# TODO: handler merger patches. These are the patches that darcs creates
-# when you  pull a patch that  conflicts with one already  in your local
-# repository. A merger is a piece  of darcs book keeping that identifies
-# the conflicts.  The conflict  is resolved  by the  next patch  that is
-# commited.
-
-# TODO: verify handling of changes to binaries actually works
-#
-# TODO: obtain  patch  order  by extracting  timestamps  in order  from
-# inventory file.
-#
 # TODO: assert that there are no untracked files after applying changes to
 # the git repo.
 #
 # TODO: Git doesn't like empty directories, so insert a hidden 
 # .darcs-fast-export file in each new dir (and add it to git).
+#
+# TODO: Resumability.
 
 require 'enumerator'
 require 'optparse'
 require 'open3'
 require 'fileutils'
+require 'sha1'
+require 'patch_parser'
 
 class PatchExporter
 
@@ -90,199 +81,36 @@ class PatchExporter
     end
   end
 
-  # Generates a list  of all patches in the repo  that are referenced by
-  # the inventory. (Darcs  keeps patch files around after  an unpull but
-  # it does this merely by removing  the reference to the patch from the
-  # inventory).
-  #
-  # NOTE: this  method is probably not  very robust. We should  sort the
-  # list of patches  so that they are  in the same order as  they are in
-  # the inventory. I  don't think the timestamp is enough,  as Darcs may
-  # have commuted some patches into a non-temporal order.
   def generate_patch_list
-    @patches = []
-    Dir.new("#{@darcsrepo}/_darcs/patches").entries.each do |entry|
-      if entry =~ /\.gz$/
-        @patches << entry
+    patches = []
+    instream = IO.popen("cat #{@darcsrepo}/_darcs/inventory")
+    begin
+      log "reading patch"
+      patch = PatchInfo.read(instream)
+      if !patch.nil?
+        patches << patch
+      else
+        break
       end
-    end
-    inventory = open("#{@darcsrepo}/_darcs/inventory") {|f| f.read}
-    to_remove = []
-    @patches.each do |p|
-      tstamp = p[0..13]
-      if !inventory.include?(tstamp)
-        to_remove << p
-      end
-    end
-    @patches = (@patches.select {|p| !to_remove.include? p}).sort
-
+    rescue
+      log $!.message
+      exit 1
+    end while true
+    instream.close
+    patches
   end
 
   def export
-    generate_patch_list
-    @patches.each do |patch|
-      log "converting patch #{patch}"
-      @current_patch = patch
-      @in = IO.popen("gunzip -c #{@darcsrepo}/_darcs/patches/#{patch}")
-      export_patch
+    patches = generate_patch_list
+    log "read #{patches.size} patches from the Darcs inventory"
+    patches.each do |patch|
+      log "converting patch #{patch.filename}"
+      @current_patch = patch.filename
+      instream = IO.popen("gunzip -c #{@darcsrepo}/_darcs/patches/#{patch.filename}")
+      DarcsPatchParser.new(instream, 
+        ExportToGitPatchHandler.new(
+          @gitrepo, @current_patch, self, @skip_binaries, @authors)).parse
     end
-  end
-
-
-  def export_patch
-
-    # This method is complicated. It  can probably be made much simpler.
-    # One of the  reasons for the complexity is that  darcs patches have
-    # differing formats,  depending on  the version  of darcs  that made
-    # them. Which makes the whole thing a little tricky. E.g. at the end
-    # of the  last message line, some  patches end with a  '{' and close
-    # off the whole patch with another '}'.  This is good: it means if I
-    # get and EOF  error it's because I've screwed up  the parsing code.
-    # However, some darcs patches omit the '{' and '}' which means I can
-    # no longer tell when I have screwed up.
-
-    short_message_line = nextline
-    author_line = nextline
-
-    short_message = short_message_line[1..-1].rstrip
-    index_of_delim = author_line.index("**") || author_line.index("*-")
-    author = author_line[0..index_of_delim - 1]
-
-    long_message = ""
-
-    if author_line =~ /[0-9]{14}$/
-      begin
-        line = nextline
-        long_message = "#{long_message}#{line}"
-      end while !(line =~ /^\]/)
-    else 
-      if author_line =~ /[0-9]{14}\] (adddir|addfile|replace|rmfile|rmdir|hunk|move|binary|merger|changepref)/
-        to_keep = author_line[author_line.index("] ") + 2..-1]
-        unreadline(to_keep)        
-      elsif author_line =~ /[0-9]{14}\] \{$/
-        # continue
-      else
-        log "unknown patch format: author_line '#{author_line}'"
-        log "in patch #{@current_patch}"
-        exit 1
-      end
-    end
-   
-    git_message = "#{short_message}#{long_message}"
-    git_message.gsub! /\\n/, "\\n"
-    git_message.gsub! /['"`]/, ""
-
-    log "author: '#{author}'"
-    log "message: '#{git_message}'"
-
-    special_hunk_nesting = 0
-
-    begin
-      line = nextline
-      until line =~ /^\}$/ and special_hunk_nesting == 0
-        if line =~ /^adddir/
-          dir = fix_file_name(line.gsub(/^adddir /, "").rstrip)
-          add_dir(dir)
-        elsif line =~ /^addfile/
-          file = fix_file_name(line.gsub(/^addfile /, "").rstrip)
-          add_file(file)
-        elsif line =~ /^rmfile/
-          file = fix_file_name(line.gsub(/^rmfile /, "").rstrip)
-          rm_file(file)
-        elsif line =~ /^rmdir/
-          dir = fix_file_name(line.gsub(/^rmdir /, "").rstrip)
-          FileUtils.rm_rf "#{@gitrepo}/#{dir}"
-        elsif line =~ /^hunk/
-          file, line_number = line.gsub(/^hunk /, "").rstrip.split(" ")
-          file = fix_file_name(file)
-          line_number = line_number.to_i
-          apply_hunk(file, line_number)
-        elsif line =~ /^binary/
-          file = fix_file_name(line.gsub(/^binary /, "").rstrip)
-          write_binary(file)
-        elsif line =~ /^move /
-          before, after = line.gsub(/^move /, "").split(" ")
-          after = fix_file_name(after)
-          log "renaming '#{before}' -> '#{after}'"
-          # Apparently darcs thinks is a good idea to add and then
-          # move a file in the same patch. Before we attempt to move
-          # a file that's not yet on disk, let's just simply remove
-          # the name from 'added_files' if it's there, and replace
-          # it with the new name.
-          if @added_files.include? before
-            @added_files.delete(before)
-            @added_files << after
-          else
-            File.rename "#{@gitrepo}/#{before}", "#{@gitrepo}/#{after}"
-          end
-          @renamed_files[before] = after
-        elsif line =~ /^merger/
-          # I think we can just *consume* the 'merger' as the next
-          # patch file we parse will contain the complete patch resolution.
-          unreadline(line)
-          consume_merger(0)
-        elsif line =~ /^changepref/
-          # we don't do any thing with changepref (meaningless in Git)
-          # but we do need to consume it.
-          # changepref is of the format:
-          # changepref pref_name <newline> <newline> value
-          nextline
-          nextline
-        elsif line =~ /^replace/
-          file, ignored, to_replace, replacement = line.gsub(/^replace /, "").rstrip.split(" ")
-          replace(file, to_replace, replacement)
-        elsif line =~ /^\{/
-          # Dammit, I hate it when  I find something I don't understand.
-          # I have  a '{'  appearing as  the first  character on  a line
-          # within a hunk. And further down  I have a lone '}'. For some
-          # reason,  this hunk  is special  and I  don't know  why. I'll
-          # parse them for now, but ignore them.
-          special_hunk_nesting += 1
-        elsif line =~ /^\}/
-          special_hunk_nesting -= 1
-          unreadline(line) if special_hunk_nesting == 0 # force termination at top of loop
-        else
-          log err_unexpected(line, 
-            "/^(adddir|addfile|replace|rmfile|rmdir|hunk|move|binary|merger|changepref)/")
-          log "in patch #{@current_patch}"
-          exit 1
-        end
-        line = nextline
-      end
-    rescue EOFError
-      log "unexpected end of patch file detected"
-      #exit 1
-    ensure
-      @lin_buf = []
-      @in = nil
-    end
-    log "changes to working tree complete; updating GIT repository"
-
-    @renamed_files.keys.each_slice(80) {|files| run_git "add -u #{(files.map{|file| "'#{file}'"}).join(" ")}"}
-    @renamed_files.values.each_slice(80) {|files| run_git "add #{(files.map{|file| "'#{file}'"}).join(" ")}"}
-    @added_files = @added_files - @deleted_files
-    @added_files.each_slice(80) {|files| run_git "add #{(files.map {|file| "'#{file}'"}).join(" ")}"}
-    # Darcs deletes a file by creating a hunk that removes all the lines
-    # then deletes the file.  In that case we want no files in the changed list
-    # that are in the deleted list, or we will break Git.
-    run_git "add -u"  # take care of changed and deleted files
-    run_git "commit -m '#{git_message}' --author \"#{@authors.get_email(author)}\""
-    @added_files = []
-    @renamed_files = {}
-    @deleted_files = []
-    @line_number = 1
-    log "finished importing patch"
-  end
-
-  def consume_merger(depth)
-    begin 
-      line = nextline
-      if line =~ /^merger/
-        depth+=1
-      elsif line =~ /^\)/
-        depth-=1
-      end
-    end while depth > 0
   end
 
   def parse_command_line(args)
@@ -343,201 +171,11 @@ class PatchExporter
       exit(1)
     end
   end
-
-
-  def run_git(command)
-    Open3.popen3("(cd #{@gitrepo} && git #{command})") do |sin,sout,serr|
-      log "executing command '#{command}'"
-      sinlines = sout.readlines
-      serrlines = serr.readlines
-      if serrlines.size > 0
-        serrlines.each {|line| $stderr.puts line }
-        log "in patch #{@current_patch}"
-        exit 1
-      end
-    end
-  end
-
-  def replace(file, oldtext, newtext)
-    command = "sed -i 's/#{oldtext}/#{newtext}/g' #{@gitrepo}/#{file}"
-    Open3.popen3("(#{command})") do |sin,sout,serr|
-      log "executing command '#{command}'"
-      sinlines = sout.readlines
-      serrlines = serr.readlines
-      if serrlines.size > 0
-        serrlines.each {|line| $stderr.puts line }
-        exit 1
-      end
-    end
-  end
-
-  def fix_file_name(file)
-    file.gsub(/\\32\\/, " ")
-  end
-
-  def read_hunk file
-    log "reading hunk for '#{file}'"
-    line = nextline
-    deleted_lines = []
-    inserted_lines= []
-    until !(line =~ /^([+]|[-])/)
-      deleted_lines << line[1..-1] if line =~ /^[-]/
-      inserted_lines << line[1..-1] if line =~ /^[+]/
-      line = nextline
-    end
-    unreadline(line)
-    return deleted_lines, inserted_lines
-  end
-
-  def read_original_file(file)
-    in_file = open_file_for_reading(file)
-    origin_lines = nil
-    begin
-      orig_lines = in_file.readlines
-    ensure
-      in_file.close
-    end
-    orig_lines
-  end
-
-  def open_file_for_reading(file)
-      File.new("#{@gitrepo}/#{file}", "r")
-  end
-
-  def apply_hunk(file, line_number)
-    log "applying hunk to '#{file}'"
-    if @added_files.include? file
-      # optimisation: avoid reading the entire hunk into 
-      # RAM when it's a new file that we are creating
-      out_file = File.new("#{@gitrepo}/#{file}", "w")
-      begin
-        line = nextline 
-        until !(line =~ /^([+]|[-])/) # for some reason, even on a new file, we can have '-' lines....??
-          out_file.write(line[1..-1]) if line =~ /^[+]/
-          line = nextline
-        end
-        unreadline(line)
-      ensure
-        out_file.close
-      end
-    else
-      # this hunk is a change to an existing file, so consume
-      # the original, perform the merge in RAM and write out the result
-      deleted_lines, inserted_lines = read_hunk file
-      if File.exists?("#{@gitrepo}/#{file}")
-        orig_lines = read_original_file(file)
-        orig_lines_index = line_number - 1
-
-        deleted_lines.size.times {|i| orig_lines.delete_at orig_lines_index}
-        orig_lines.insert(orig_lines_index, inserted_lines)
-        orig_lines.flatten!
-        
-        out_file = File.new("#{@gitrepo}/#{file}", "w")
-        begin
-          orig_lines.each do |orig_line|
-            out_file.write orig_line
-          end
-        ensure
-          out_file.close
-        end
-      else
-        log "WARN: attempt to apply hunk to non-existing file #{file}"
-        if inserted_lines.size == 0
-          log "No lines were inserted"
-        else
-          log "lines were supposed to be inserted - something bad has happened"
-          exit 1
-        end
-      end
-    end
-  end
-
-  def nextline
-    @line_number = @line_number + 1
-    if @line_buf.size > 0
-      @line_buf.pop
-    else
-      @in.readline
-    end
-  end
-
-  def unreadline(line)
-    raise "nil line!" unless line
-    @line_number = @line_number - 1
-    @line_buf.push line
-  end
-
-  def add_file(file)
-    @added_files << file
-    log "adding file #{file}"
-    out_file = File.new("#{@gitrepo}/#{file}", "w")
-    out_file.close
-  end
-
-  def write_binary(file)
-    if @skip_binaries
-      log "NOT writing binary file #{file}, skipping"
-    else
-      log "writing binary file #{file}"
-    end
-
-    out_file = File.new("#{@gitrepo}/#{file}", "w") unless @skip_binaries
-    begin
-      consume_line(/^oldhex/)
-      until nextline =~ /^newhex/
-      end
-      until (line = nextline) =~ /^[^*]/
-        unpack_binary(line[1..-1], out_file) unless @skip_binaries
-      end
-      ensure
-      out_file.close unless @skip_binaries
-    end
-    unreadline(line)
-  end
-
-  def add_dir(dir)
-    @added_files << dir
-    log "adding dir '#{dir}'"
-    Dir.mkdir "#{@gitrepo}/#{dir}"
-  end
-
-  def rm_file(file)
-    @deleted_files << file
-    log "removing file '#{file}'"
-    if File.exists? "#{@gitrepo}/#{file}"
-      File.delete "#{@gitrepo}/#{file}"
-    else
-      log "file did not exist, this may be an error but its valid for " +
-        "two patches to remove the same file and not conflict"
-    end
-    # weird, I know but darcs will happily create, edit, move and then
-    # destroy a file all in the same patch.  So we need to remove the file
-    # from the 'add' list.
-    @added_files.delete(file)
-    @renamed_files.delete(@renamed_files.invert[file])
-  end
-
-  def consume_line(regex)
-    line = nextline
-    raise err_unexpected(line, regex) unless line =~ regex
-    line
-  end
-
-  def err_unexpected(line, regex)
-    "unexpected token(s) '#{line.strip}' at line #{@line_number} " + 
-      "(expecting match against regex #{regex})"
-  end
-
+  
   def log(msg)
     STDERR.puts "darcs-fast-export: #{msg}"
   end
 
-  # Converts a string of pairs of hex digits to bytes.
-  # I doubt this is quick, but it's so ingenious (not my own
-  # ingenuity, I must confess - found it on the web!).
-  def unpack_binary(line, file)
-    line.scan(/.{2}/).each { |hex_byte| file.putc(hex_byte.hex.chr) }
-  end
 end
 
 class AuthorFile
@@ -556,6 +194,250 @@ class AuthorFile
     email = @authors[author]
     email unless email
     "James Sadler <freshtonic@gmail.com>"
+  end
+end
+
+# This class was taken from the darcs-ruby project.
+# This class holds the patch's name, log, author, date, and other
+# meta-info.
+class PatchInfo
+  def initialize(date, name, author, log = nil, inverted = false)
+    if date.kind_of?(String)
+      @date = parse_date(date)
+    else
+      @date = date
+    end
+    @name = name
+    @author = author
+    @log = log
+    @inverted = inverted
+  end
+
+  attr_reader :date, :name, :author, :log
+  def inverted?
+    @inverted
+  end
+
+  # Reads a patch from a stream using the inventory format
+  def self.read(f)
+    line = f.gets
+    return nil if line.nil?
+    if line[0..0] != '['
+      raise "Invalid inventory entry (starts with \"#{line[0..-2]}\")"
+    end
+
+    name = line[1..-2]
+    line = f.readline
+    raise "Invalid inventory entry '#{line}'" if !line[/^(.*)\*(\*|\-)([0-9]{14})\]?\s*$/]
+    author = $1
+    date = $3
+    log = nil
+    if !line[/\]\s*$/]
+      log = ""
+      log += line[1..-1] while !((line = f.readline) =~ /^\]/)
+    end
+
+    return self.new(date, name, author, log)
+  end
+
+  # Retrieve the patch's date in string timestamp format
+  def timestamp
+    date.strftime("%Y%m%d%H%M%S") 
+  end
+
+  # Retrieve the patch's name
+  def filename
+    author_hash = SHA1.new(author).to_s[0..4]
+    hash = SHA1.new(name + author + timestamp +
+                    (log.nil? ? '' : log.gsub(/\n/, '')) +
+                    (inverted? ? 't' : 'f'))
+    "#{timestamp}-#{author_hash}-#{hash}.gz"
+  end
+
+  def to_s
+    if log
+      the_log = log.gsub(/[\n\s]+$/, '').gsub(/\n/, "\n ")
+    end
+    "[#{name}\n#{author}**#{timestamp}" +
+    (log.nil? ? '' : "\n " + the_log + "\n") + "]"
+  end
+
+protected
+  def parse_date(str)
+    # Format is YYYYMMDDHHMMSS
+    Time.gm(str[0..3].to_i, str[4..5].to_i, str[6..7].to_i, str[8..9].to_i,
+            str[10..11].to_i, str[12..13].to_i)
+  end
+end
+
+class ExportToGitPatchHandler < PatchHandler
+
+  def initialize(gitrepo, patch_name, logger, skip_binaries, authors)
+    @added = []
+    @renamed = {}
+    @deleted = []
+    @logger = logger
+    @gitrepo = gitrepo
+    @patch_name = patch_name
+    @skip_binaries = skip_binaries
+    @authors = authors
+  end
+
+  def metadata author, short_msg, long_msg, timestamp, inverted
+    @author = author
+    @git_message = "#{short_msg}\n#{@long_msg}\n\n" + 
+      "Exported from Darcs patch: #{@patch_name}".gsub("[']", '["]')
+    @timestamp = timestamp
+    @inverted = inverted
+  end
+
+  def addfile file
+    @added << file
+    log "adding file #{file}"
+    FileUtils.touch("#{@gitrepo}/#{file}")
+  end
+
+  def adddir dir
+    @added << dir
+    log "adding dir '#{dir}'"
+    Dir.mkdir "#{@gitrepo}/#{dir}"
+  end
+
+  def move file, to
+    # Apparently darcs thinks is a good idea to add and then
+    # move a file in the same patch. Before we attempt to move
+    # a file that's not yet on disk, let's just simply remove
+    # the name from 'added_files' if it's there, and replace
+    # it with the new name.
+    if @added.include? file
+      @added.delete(file)
+      @added<< to
+    else
+      File.rename "#{@gitrepo}/#{file}", "#{@gitrepo}/#{to}"
+    end
+    @renamed[file] = to
+  end
+
+  def hunk file, line_number, inserted_lines, deleted_lines
+    if File.exists?("#{@gitrepo}/#{file}")
+      orig_lines = read_original_file(file)
+      orig_lines_index = line_number - 1
+
+      deleted_lines.size.times {|i| orig_lines.delete_at orig_lines_index}
+      orig_lines.insert(orig_lines_index, inserted_lines)
+      orig_lines.flatten!
+      
+      out_file = File.new("#{@gitrepo}/#{file}", "w")
+      begin
+        orig_lines.each do |orig_line|
+          out_file.write orig_line
+        end
+      ensure
+        out_file.close
+      end
+    else
+      log "WARN: attempt to apply hunk to non-existing file #{file}"
+      if inserted_lines.size == 0
+        log "No lines were inserted"
+      else
+        log "lines were supposed to be inserted - something bad has happened"
+        exit 1
+      end
+    end
+  end
+
+  def changepref pref, value
+    # do nothing.  No equivalent exists in Git
+  end
+
+  def rmfile file
+    @deleted << file
+    log "removing file '#{file}'"
+    if File.exists? "#{@gitrepo}/#{file}"
+      File.delete "#{@gitrepo}/#{file}"
+    else
+      log "file did not exist, this may be an error but its valid for " +
+        "two patches to remove the same file and not conflict"
+    end
+    # weird, I know but darcs will happily create, edit, move and then
+    # destroy a file all in the same patch.  So we need to remove the file
+    # from the 'add' list.
+    @added.delete(file)
+    @renamed.delete(@renamed.invert[file])
+  end
+
+  def rmdir dir
+    FileUtils.rm_rf "#{@gitrepo}/#{dir}"
+  end
+
+  def binary file, datastream
+    if @skip_binaries
+      log "NOT writing binary file #{file}, skipping"
+    else
+      log "writing binary file #{file}"
+    end
+  end
+
+  def merger
+    # do nothing (the parser currently skips over them)
+  end
+
+  def replace file, to_replace, replacement
+    command = "sed -i 's/#{oldtext}/#{newtext}/g' #{@gitrepo}/#{file}"
+    Open3.popen3("(#{command})") do |sin,sout,serr|
+      log "executing command '#{command}'"
+      sinlines = sout.readlines
+      serrlines = serr.readlines
+      if serrlines.size > 0
+        serrlines.each {|line| $stderr.puts line }
+        exit 1
+      end
+    end
+  end
+
+  def skip_binaries?
+    @skip_binaries
+  end
+
+  def finished
+    @renamed.keys.each_slice(80) {|files| run_git "add -u #{(files.map{|file| "'#{file}'"}).join(" ")}"}
+    @renamed.values.each_slice(80) {|files| run_git "add #{(files.map{|file| "'#{file}'"}).join(" ")}"}
+    @added = @added - @deleted
+    @added.each_slice(80) {|files| run_git "add #{(files.map {|file| "'#{file}'"}).join(" ")}"}
+    # Darcs deletes a file by creating a hunk that removes all the lines
+    # then deletes the file.  In that case we want no files in the changed list
+    # that are in the deleted list, or we will break Git.
+    run_git "add -u"  # take care of changed and deleted files
+    run_git "commit -m '#{@git_message}' --author \"#{@authors.get_email(@author)}\""
+  end
+
+  private
+  def run_git(command)
+    Open3.popen3("(cd #{@gitrepo} && git #{command})") do |sin,sout,serr|
+      log "executing command '#{command}'"
+      sinlines = sout.readlines
+      serrlines = serr.readlines
+      if serrlines.size > 0
+        serrlines.each {|line| $stderr.puts line }
+        log "in patch #{@current_patch}"
+        exit 1
+      end
+    end
+  end
+
+  def log(msg)
+    @logger.log(msg)
+  end
+
+  def read_original_file(file)
+    in_file = File.new("#{@gitrepo}/#{file}", "r")
+    origin_lines = nil
+    begin
+      orig_lines = in_file.readlines
+    ensure
+      in_file.close
+    end
+    orig_lines
   end
 end
 
