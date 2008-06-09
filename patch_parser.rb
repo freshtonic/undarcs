@@ -1,5 +1,10 @@
 #!/usr/bin/ruby 
 
+# Parses Darcs 1 patches.
+# Will not handle Darcs 2 repositories.
+# NOTE: this class assumes that IO#ungetc can be invoked more than
+# once (enough times to push back a line of text).  This is not 
+# guaranteed by the Ruby docs, but works for me.
 class DarcsPatchParser
 
   def initialize(instream, handler = PatchHandler.new)
@@ -65,6 +70,7 @@ class DarcsPatchParser
         to = fix_file_name(to)
         @handler.move from, to
       elsif token == "merger"
+        unread_line("merger")
         parse_merger
         @handler.merger # currently we ignore mergers
       elsif token == "changepref"
@@ -127,9 +133,14 @@ class DarcsPatchParser
     # consume it only.  Not interested in the values.
     read_line
     read_line
+    read_line
   end
 
   def parse_merger
+    # FIXME: this doesn't seem to work for deeply nexted merges.
+    # SEE: 20070329070647-40eb8-55ed38a7c409671953f1306f4d69538addf296d1.gz
+    # fails trying to apply hunk to file: 
+    # ./adminapp/src/java/com/mooter/admanager/priv/bucket/ui/CreateSearchBucketController.java
     depth = 0
     begin 
       line = read_line
@@ -194,27 +205,20 @@ class DarcsPatchParser
     header_regexp = 
     /^\[([^\n]+)\n([^\*]+)\*([-\*])(\d{14})(?:\n((?:^\ [^\n]*\n)+))?\]/     
 
-
-    first_few_lines = ""
-    8.times {|i| first_few_lines += read_line }
-
-    match_data = header_regexp.match(first_few_lines)
-    if !match_data.nil? 
-      short_message = $1
-      author_email = $2
-      inverted = $3 == "-" ? true : false
-      timestamp = $4
-      long_message = $5
-
-      length_of_match = match_data[0].size
-
-      # push the remaining part of the last 10 lines back onto the stream.
-      first_few_lines[length_of_match..-1].reverse.each_byte {|b| @in.ungetc b}
-
-      return author_email, short_message, long_message, timestamp, inverted
-    else
-      raise PatchParseException, "could not parse patch header: '#{first_few_lines}'"
+    lines = read_line
+    until match_data = header_regexp.match(lines)
+      lines += read_line
     end
+
+    short_message = $1
+    author_email = $2
+    inverted = $3 == "-" ? true : false
+    timestamp = $4
+    long_message = $5
+    length_of_match = match_data[0].size
+    # push the remaining part of the last 10 lines back onto the stream.
+    lines[length_of_match..-1].reverse.each_byte {|b| @in.ungetc b}
+    return author_email, short_message, long_message, timestamp, inverted
   end
 
   def expect_char(expected_ch)
@@ -241,7 +245,7 @@ class PatchHandler
   def hunk file, line_number, inserted_lines, deleted_lines
     puts "hunk: file: '#{file}' line: #{line_number}"
   end
-  def changepref pref, value
+  def changepref 
     puts "changepref"
   end
   def rmfile file
@@ -256,7 +260,7 @@ class PatchHandler
   def merger
     puts "merger:"
   end
-  def replace file, to_replace, replacement
+  def replace file, regexp, to_replace, replacement
     puts "replace: file '#{file}' replace: '#{to_replace}' with '#{replacement}'"
   end
   def skip_binaries?

@@ -285,8 +285,8 @@ class ExportToGitPatchHandler < PatchHandler
 
   def metadata author, short_msg, long_msg, timestamp, inverted
     @author = author
-    @git_message = "#{short_msg}\n#{@long_msg}\n\n" + 
-      "Exported from Darcs patch: #{@patch_name}".gsub("[']", '["]')
+    @git_message = ("#{short_msg}\n#{long_msg}\n\n" + 
+      "Exported from Darcs patch: #{@patch_name}").gsub(/[']/, '"')
     @timestamp = timestamp
     @inverted = inverted
   end
@@ -309,12 +309,11 @@ class ExportToGitPatchHandler < PatchHandler
     # a file that's not yet on disk, let's just simply remove
     # the name from 'added_files' if it's there, and replace
     # it with the new name.
+    File.rename "#{@gitrepo}/#{file}", "#{@gitrepo}/#{to}"
     if @added.include? file
       @added.delete(file)
-      @added<< to
-    else
-      File.rename "#{@gitrepo}/#{file}", "#{@gitrepo}/#{to}"
     end
+    @added << to
     @renamed[file] = to
   end
 
@@ -340,13 +339,12 @@ class ExportToGitPatchHandler < PatchHandler
       if inserted_lines.size == 0
         log "No lines were inserted"
       else
-        log "lines were supposed to be inserted - something bad has happened"
-        exit 1
+        raise "lines were supposed to be inserted - something bad has happened"
       end
     end
   end
 
-  def changepref pref, value
+  def changepref 
     # do nothing.  No equivalent exists in Git
   end
 
@@ -382,7 +380,7 @@ class ExportToGitPatchHandler < PatchHandler
     # do nothing (the parser currently skips over them)
   end
 
-  def replace file, to_replace, replacement
+  def replace file, regexp, oldtext, newtext
     command = "sed -i 's/#{oldtext}/#{newtext}/g' #{@gitrepo}/#{file}"
     Open3.popen3("(#{command})") do |sin,sout,serr|
       log "executing command '#{command}'"
@@ -390,7 +388,7 @@ class ExportToGitPatchHandler < PatchHandler
       serrlines = serr.readlines
       if serrlines.size > 0
         serrlines.each {|line| $stderr.puts line }
-        exit 1
+        raise  "error executing command '#{command}'"
       end
     end
   end
@@ -420,7 +418,7 @@ class ExportToGitPatchHandler < PatchHandler
       if serrlines.size > 0
         serrlines.each {|line| $stderr.puts line }
         log "in patch #{@current_patch}"
-        exit 1
+        raise "executing command '#{command}'"
       end
     end
   end
