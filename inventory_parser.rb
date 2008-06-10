@@ -34,17 +34,16 @@ class InventoryParser
     inverted = $3 == "-" ? true : false
     date = $4
     long_message = $5
+
     if long_message
       stripped = ""
       long_message.each_line {|l| stripped += l[1..-1] }
       long_message = stripped
     end
-    length_of_match = match_data[0].size
+    
+    start_of_match, end_of_match = match_data.offset(0)
     # push the remaining part of the last 10 lines back onto the stream.
-    lines[length_of_match..-1].reverse.each_byte {|b| f.ungetc b}
-
-      puts "author: '#{author_email}'\nshort: '#{short_message}'\n" + 
-        "date: '#{date}'\nlong: '#{long_message}'\ninverted: '#{inverted}'"
+    lines[end_of_match..-1].reverse.each_byte {|b| f.ungetc b}
 
     return self.new(date, short_message, author_email, long_message)
   end

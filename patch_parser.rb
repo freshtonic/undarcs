@@ -106,7 +106,7 @@ class DarcsPatchParser
       line = read_line
     end
     unread_line(line)
-    return deleted_lines, inserted_lines
+    return inserted_lines, deleted_lines
   end
 
   def parse_binary
@@ -215,9 +215,11 @@ class DarcsPatchParser
     inverted = $3 == "-" ? true : false
     timestamp = $4
     long_message = $5
-    length_of_match = match_data[0].size
+    
+    start_of_match, end_of_match = match_data.offset(0)
     # push the remaining part of the last 10 lines back onto the stream.
-    lines[length_of_match..-1].reverse.each_byte {|b| @in.ungetc b}
+    lines[end_of_match..-1].reverse.each_byte {|b| f.ungetc b}
+
     return author_email, short_message, long_message, timestamp, inverted
   end
 
