@@ -1,5 +1,27 @@
 #!/usr/bin/ruby 
 
+=begin
+
+darcs-fast-import: 
+  convert a Darcs (Version 1) repository to Git, without invoking Darcs.
+
+Copyright (C) 2008  James Sadler <freshtonic@gmail.com>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+=end
+
 # Parses Darcs 1 patches.
 # Will not handle Darcs 2 repositories.
 # NOTE: this class assumes that IO#ungetc can be invoked more than
@@ -123,8 +145,6 @@ class DarcsPatchParser
     until read_line =~ /^newhex/
     end
     data = []
-
-    puts "skipping binary"
 
     until (line = read_line) =~ /^[^*]/
       if !@handler.skip_binaries?

@@ -1,50 +1,27 @@
 #!/usr/bin/ruby
 
-# Copyright (C) 2007 James Sadler <freshtonic@gmail.com>
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+=begin
 
-# Reads a Darcs repository one patch file at a time and 'replays' those
-# patches in the order that they were applied, and capturing the changes
-# after each patch application using git.
-#
-# At the end of the process, there should be a new git repository whose
-# head is the same as the darcs pristine tree,
-#
-# How it works
-# ------------
-#
-# darcs-fast-export takes each darcs  patch and follows the instructions
-# contained within the patch to modify  the working tree. Once the patch
-# has been successfully applied, darcs-fast-import invokes the necessary
-# git commands in  order for git to  commit a patch that  makes the same
-# changes to the working copy as the darcs patch.
-#
-# darcs-fast-export is  pretty dumb.  It doesn't understand  darcs patch
-# dependencies and assumes that the patch timestamps accurately reflect
-# the order the patches were created.
-#
-# When should you use darcs-fast-export?  When tailor or darcs2git.py do
-# not work because  your repository is too big. tailor  and friends work
-# by invoking darcs to pull the patches  one at a time. While this works
-# for most  darcs repositories,  it doesn't  work on  large repositories
-# that seem  to bring out the  worst in darcs time/space  performance. I
-# found my  own repository  was unexportable  using those  tools because
-# darcs would  die due to  an out  of memory error  after over a  day of
-# processing time.
-#
+darcs-fast-import: 
+  convert a Darcs (Version 1) repository to Git, without invoking Darcs.
+
+Copyright (C) 2008  James Sadler <freshtonic@gmail.com>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+=end
+
 
 # TODO: assert that there are no untracked files after applying changes to
 # the git repo.
