@@ -39,18 +39,11 @@ require 'sha1'
 require 'patch_parser'
 require 'inventory_parser'
 require 'export_to_git_patch_handler'
+require 'author_file'
 
 class PatchExporter
 
   def initialize(args)
-    @line_buf = []      # holds lines that we have unread.
-    @line_number = 1    # the number of the line in the Darcs patch
-                        # that we are currently parsing (starting at 1)
-    @added_files = []   
-    @deleted_files = []
-    @renamed_files = {}
-    @in = nil           # input stream for the currently parsed patch
-
     parse_command_line(args)
     begin
       @authors = AuthorFile.new @authorsfile
@@ -60,37 +53,40 @@ class PatchExporter
     end
   end
 
-  def generate_patch_list
-    patches = []
-    instream = IO.popen("cat #{@darcsrepo}/_darcs/inventory")
-    begin
-      patch = InventoryParser.read(instream)
-      if !patch.nil?
-        patches << patch
-      else
-        break
-      end
-    rescue EOFError
-      break
-    rescue 
-      log $!.message
-      exit 1
-    end while true
-    instream.close
-    patches
-  end
-
   def export
-    patches = generate_patch_list
-    log "read #{patches.size} patches from the Darcs inventory"
-    patches.each do |patch|
+    generate_patch_list.each do |patch|
       log "converting patch #{patch.filename}"
-      @current_patch = patch.filename
       instream = IO.popen("gunzip -c #{@darcsrepo}/_darcs/patches/#{patch.filename}")
       DarcsPatchParser.new(instream, 
         ExportToGitPatchHandler.new(
-          @gitrepo, @current_patch, self, @skip_binaries, @authors)).parse
+          @gitrepo, patch.filename, self, @skip_binaries, @authors)).parse
     end
+  end
+
+  def log(msg)
+    STDERR.puts "darcs-fast-export: #{msg}"
+  end
+
+  private
+
+  def generate_patch_list
+    patches = []
+    File.open("#{@darcsrepo}/_darcs/inventory") do |f|
+      begin
+        patch = InventoryParser.read(f)
+        if !patch.nil?
+          patches << patch
+        else
+          break
+        end
+      rescue EOFError
+        break
+      rescue 
+        log $!.message
+        exit 1
+      end while true
+    end
+    patches
   end
 
   def parse_command_line(args)
@@ -151,32 +147,8 @@ class PatchExporter
       exit(1)
     end
   end
-  
-  def log(msg)
-    STDERR.puts "darcs-fast-export: #{msg}"
-  end
 
 end
 
-class AuthorFile
-  def initialize(file)
-    f = File.new(file)
-    lines = f.readlines
-    @authors = {}
-    lines.each do |line|
-      key, value = line.split("=")
-      @authors[key] = value.rstrip      
-    end
-    f.close
-  end
-
-  def get_email(author)
-    email = @authors[author]
-    email unless email
-    "James Sadler <freshtonic@gmail.com>"
-  end
-end
-
-
-PatchExporter.new(ARGV).export()
+PatchExporter.new(ARGV).export() if __FILE__ == $0
 
