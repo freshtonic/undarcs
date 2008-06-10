@@ -27,9 +27,14 @@ class ExportToGitPatchHandler < PatchHandler
   end
 
   def adddir dir
-    @added << dir
     log "adding dir '#{dir}'"
-    Dir.mkdir "#{@gitrepo}/#{dir}"
+    FileUtils.mkdir "#{@gitrepo}/#{dir}"
+    FileUtils.touch "#{@gitrepo}/#{dir}/.keepme"
+    if !File.exists? "#{@gitrepo}/#{dir}/.keepme"
+      raise "WHOAH! file #{@gitrepo}/#{dir}/.keepme does not exist!"
+    end
+    @added << "#{dir}"
+    @added << "#{dir}/.keepme"
   end
 
   def move file, to
@@ -65,10 +70,11 @@ class ExportToGitPatchHandler < PatchHandler
       end
     else
       log "WARN: attempt to apply hunk to non-existing file #{file}"
-      if inserted_lines.size == 0
+      if inserted_lines.size == 0 || only_whitespace?(inserted_lines)
         log "No lines were inserted"
       else
-        raise "lines were supposed to be inserted - something bad has happened"
+        raise "lines were supposed to be inserted - something bad has happened. lines:\n" +
+          lines.join("\n+")
       end
     end
   end
@@ -94,7 +100,12 @@ class ExportToGitPatchHandler < PatchHandler
   end
 
   def rmdir dir
-    FileUtils.rm_rf "#{@gitrepo}/#{dir}"
+    if File.exists? "#{@gitrepo}/#{dir}"
+      FileUtils.rm_rf "#{@gitrepo}/#{dir}"
+      @added.delete(dir)
+      @added.delete("#{dir}/.keepme")
+      @renamed.delete(@renamed.invert[dir])
+    end
   end
 
   def binary file, datastream
@@ -165,6 +176,11 @@ class ExportToGitPatchHandler < PatchHandler
       in_file.close
     end
     orig_lines
+  end
+
+  def only_whitespace?(lines)
+    lines.each {|l| return false if l.strip != "" }
+    true
   end
 end
 

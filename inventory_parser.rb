@@ -45,7 +45,7 @@ class InventoryParser
     # push the remaining part of the last 10 lines back onto the stream.
     lines[end_of_match..-1].reverse.each_byte {|b| f.ungetc b}
 
-    return self.new(date, short_message, author_email, long_message)
+    return self.new(date, short_message, author_email, long_message, inverted)
   end
 
   # Retrieve the patch's date in string timestamp format

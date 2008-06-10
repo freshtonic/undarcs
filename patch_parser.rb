@@ -46,6 +46,9 @@ class DarcsPatchParser
       elsif token == "}"
         @in.ungetc('}'[0])
         return
+      elsif token == "<"
+        @in.ungetc('<'[0])
+        parse_tag
       elsif token == "addfile"
         @handler.addfile fix_file_name(read_line.strip)
       elsif token == "adddir"
@@ -96,6 +99,11 @@ class DarcsPatchParser
     @hunk_nesting -= 1
   end
 
+  def parse_tag
+    until read_line =~ /^\>/
+    end
+  end
+
   def parse_hunk filename, line_number
     line = read_line
     deleted_lines = []
@@ -137,10 +145,6 @@ class DarcsPatchParser
   end
 
   def parse_merger
-    # FIXME: this doesn't seem to work for deeply nexted merges.
-    # SEE: 20070329070647-40eb8-55ed38a7c409671953f1306f4d69538addf296d1.gz
-    # fails trying to apply hunk to file: 
-    # ./adminapp/src/java/com/mooter/admanager/priv/bucket/ui/CreateSearchBucketController.java
     depth = 0
     begin 
       line = read_line
@@ -218,7 +222,7 @@ class DarcsPatchParser
     
     start_of_match, end_of_match = match_data.offset(0)
     # push the remaining part of the last 10 lines back onto the stream.
-    lines[end_of_match..-1].reverse.each_byte {|b| f.ungetc b}
+    lines[end_of_match..-1].reverse.each_byte {|b| @in.ungetc b}
 
     return author_email, short_message, long_message, timestamp, inverted
   end
