@@ -95,8 +95,8 @@ class ExportToGitPatchHandler < PatchHandler
       if inserted_lines.size == 0 || only_whitespace?(inserted_lines)
         log "No lines were inserted"
       else
-        raise "lines were supposed to be inserted - something bad has happened. lines:\n" +
-          lines.join("\n+")
+        log "lines were supposed to be inserted - something bad has happened. lines:\n" +
+          inserted_lines.join("\n+")
       end
     end
   end
