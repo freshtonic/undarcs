@@ -139,9 +139,7 @@ class DarcsPatchParser
 
   def parse_changepref
     # consume it only.  Not interested in the values.
-    read_line
-    read_line
-    read_line
+    3.times {|i| read_line}
   end
 
   def parse_merger
