@@ -93,7 +93,9 @@ class PatchExporter
       else
         break
       end
-    rescue
+    rescue EOFError
+      break
+    rescue 
       log $!.message
       exit 1
     end while true

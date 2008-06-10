@@ -21,24 +21,32 @@ class InventoryParser
 
   # Reads a patch from a stream using the inventory format
   def self.read(f)
-    line = f.gets
-    return nil if line.nil?
-    if line[0..0] != '['
-      raise "Invalid inventory entry (starts with \"#{line[0..-2]}\")"
+    header_regexp = 
+    /^\[([^\n]+)\n([^\*]+)\*([-\*])(\d{14})(?:\n((?:^\ [^\n]*\n)+))?\]/     
+
+    lines = f.readline
+    until match_data = header_regexp.match(lines)
+      lines += f.readline
     end
 
-    name = line[1..-2]
-    line = f.readline
-    raise "Invalid inventory entry '#{line}'" if !line[/^(.*)\*(\*|\-)([0-9]{14})\]?\s*$/]
-    author = $1
-    date = $3
-    log = nil
-    if !line[/\]\s*$/]
-      log = ""
-      log += line[1..-1] while !((line = f.readline) =~ /^\]/)
+    short_message = $1
+    author_email = $2
+    inverted = $3 == "-" ? true : false
+    date = $4
+    long_message = $5
+    if long_message
+      stripped = ""
+      long_message.each_line {|l| stripped += l[1..-1] }
+      long_message = stripped
     end
+    length_of_match = match_data[0].size
+    # push the remaining part of the last 10 lines back onto the stream.
+    lines[length_of_match..-1].reverse.each_byte {|b| f.ungetc b}
 
-    return self.new(date, name, author, log)
+      puts "author: '#{author_email}'\nshort: '#{short_message}'\n" + 
+        "date: '#{date}'\nlong: '#{long_message}'\ninverted: '#{inverted}'"
+
+    return self.new(date, short_message, author_email, long_message)
   end
 
   # Retrieve the patch's date in string timestamp format
