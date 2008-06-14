@@ -164,10 +164,10 @@ class ExportToGitPatchHandler < PatchHandler
   end
 
   def finished
-    @renamed.keys.each_slice(80) {|files| run_git "add -u #{(files.map{|file| "'#{file}'"}).join(" ")}"}
-    @renamed.values.each_slice(80) {|files| run_git "add #{(files.map{|file| "'#{file}'"}).join(" ")}"}
+    @renamed.keys.each_slice(80) {|files| run_git "add -u #{to_file_list(files)}"}
+    @renamed.values.each_slice(80) {|files| run_git "add #{to_file_list(files)}"}
     @added = @added - @deleted
-    @added.each_slice(80) {|files| run_git "add #{(files.map {|file| "'#{file}'"}).join(" ")}"}
+    @added.each_slice(80) {|files| run_git "add #{to_file_list(files)}"}
     # Darcs deletes a file by creating a hunk that removes all the lines
     # then deletes the file.  In that case we want no files in the changed list
     # that are in the deleted list, or we will break Git.
@@ -176,6 +176,11 @@ class ExportToGitPatchHandler < PatchHandler
   end
 
   private
+
+  def to_file_list(file_names)
+    (file_names.map{|file_name| "'#{file_name}'"}).join(" ")
+  end
+
   def run_git(command)
     Open3.popen3("(cd #{@gitrepo} && git #{command})") do |sin,sout,serr|
       log "executing command '#{command}'"
