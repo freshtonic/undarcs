@@ -143,6 +143,10 @@ class ExportToGitPatchHandler < PatchHandler
   end
 
   def replace file, regexp, oldtext, newtext
+    # NOTE: this is simplistic, and possibly won't work in all cases. By
+    # won't work, I mean that it may not necessarily do what Darcs does,
+    # as  it  ignores  the  token  regex that  appears  in  a  'replace'
+    # directive in a Darcs patch.
     command = "sed -i 's/#{oldtext}/#{newtext}/g' #{@gitrepo}/#{file}"
     Open3.popen3("(#{command})") do |sin,sout,serr|
       log "executing command '#{command}'"
