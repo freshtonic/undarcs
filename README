@@ -17,7 +17,7 @@
 
 darcs-fast-export is  a Ruby  script that can  natively parse  the Darcs
 (version  1) patch  format  and  replay the  patches  into a  directory,
-creating a Git commit for each Darcs patch.
+creating a Git commit for each Darcs patch (.gz file in _darcs/patches).
 
 DISCLAIMER:
 
@@ -25,36 +25,84 @@ Unless  you have  a  very  wedged or  extremely  large  Darcs repo  that
 performs too slowly  for tailor, darcs-2-git etc to recover  into a real
 DVCS, then you are probably better off not using this script.
 
-In fact,  until merger patches are  catered for, it probably  won't work
-for you. Watch this space :)
+There      are     better      alternatives      such     as      Tailor
+(http://progetti.arstecnica.it/tailor). Tailor and  all other tools that
+I am aware of perform repository  conversion by invoking the source DVCS
+binaries  directly (the  *correct*  way!), and  therefore  stand a  much
+better chance  of actually  working. The only  time you  should consider
+darcs-fast-export is when other tools  fail because of running into some
+exponential time/space bug Darcs.
+
 
 STATE OF DEVELOPMENT
 
-At the moment it cannot handle Darcs merger patches, but this should not
-be as hard  to add as it  sounds. According to this  nugget of knowledge
-(courtesy of Bertram Felgenhauer):
+I can convert a 2100-ish patch repo  into a Git repo with this script in
+about 30  minutes on  a 2.8Ghz  Intel CPU machine.  It seems  to consume
+about 500MB of RAM at it's peak.
 
-> The nice  thing about  repo patches  is that, if  they are  applied in
-> inventory  order,  and  if  you  respect  the  'merger'  hunks  (which
-> basically mean to  apply the inverse of the first  part and ignore the
-> second one), you  won't get any conflicts (that is,  if the repository
-> is  consistent).  The format  is  similar  to regular  darcs  patches,
-> without the context.
+Unfortunately  the conversion  is  not accurate  yet,  and performing  a
+recursive diff  on the original Darcs  working tree and the  Git working
+tree shows many differences.
 
-So in other words, to handle merger patches we do not need to understand
-or  re-implement the  Theory of  Patches. In  my view  of the  way Darcs
-works, the patches  + inventory in the repo is  the *result* of applying
-the Theory of Patches.
+Currently  all Darcs  1  patch  types except  for  'regrem' patches  are
+handled. I  have no 'regrem' patches  in my own repo,  so haven't tested
+that yet.
 
-If Bertram  is correct,  then it's  feasible that  this code  may handle
-merger patches within  a weekend or two.  If not, then this  will be the
-shortest-lived open source project ever conceived!
+'merger' patches are handled by ignoring them, IOW I parse past them and
+ignore  the  commands  within  them.  It  is  my  understanding  that  a
+subsequent patch will resolve the conflict (at least this is what I have
+discovered  by  reverse  engineering  the patches).  I  could  be  wrong
+however!
+
+MY UNDERSTANDING OF DARCS'S PATCH FORMAT, AND WHY I DO NOT NEED TO 
+UNDERSTAND THE THERY OF PATCHES (er, I think!)
+
+Everyone that knows something about  the internals of Darcss, knows that
+it  is based  upon  a Theory  of  Patches, which  is  a special  algebra
+for  making statements  about  and manipulating  patches.  It tells  you
+interesting things such as whether or not two patches are independent of
+each other (commutivity) etc.
+
+It turns out that  I can safely ignore all of  that because Darcs kindly
+writes the  inventory (the  identifiers and sequence  of patches  in the
+repo) and rewrites the .gz patches in  such a way that if you apply them
+in the inventory order starting with a bare tree, it all just works.*
+
+(Yes  you read  that right.  Darcs actually  messes with  your historical
+data. But it's OK because I can use that fact to my advantage.)
+
+'merger' and 'regrem'  patches are ust Darcs bookkeeping so  that it can
+remember which  patches conflict  with each other,  should you  pull new
+patches, unpull old ones etc.
+
+The great thing is we can ignore those when we are applying the patches,
+because the conflict resolution comes later in the patch series.
 
 RUNNING THE CODE
 
 To run  the code, invoke darcs-fast-export.rb  with no args and  it will
 print the options. They should be self explanatory.
 
+LASTLY...
+
+I need help.  I have come a long  way in a few late  nights and weekends
+only to discover that  the resulting tree is not the  same as the source
+tree. It could be because: 
+
+* My theory that I can ignore mergers is completely wrong.
+* There  is an error  in my hunk application  logic (seems like  all the
+content that was  supposed to be applied is actually  there, it just got
+inserted a couple of lines away from where it should have been)
+
+Anyone up for a  challenge? I am available to help  anyone and offer any
+advice in  order to get more  brains looking at this  stuff. Anyone from
+the Darcs community reading this? Feel free to offer advice.
+
 Good luck!
 
 James.
+
+
+---------
+
+* May not be true!  (I have errors in my resultant Git tree, go figure!)
